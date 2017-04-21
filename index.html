@@ -1,0 +1,452 @@
+<!-- 
+	Bitrix24 task application by mkdxdx
+
+-->
+
+<!DOCTYPE html>
+<html style="height:100%">
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		
+		<script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+		<script src="//ajax.googleapis.com/ajax/libs/jqueryui/1.10.3/jquery-ui.min.js"></script>
+		<script src="//api.bitrix24.com/api/v1/"></script>
+		
+		<script type="text/javascript" src="date.js"></script>
+		
+		<!-- Latest compiled and minified CSS -->
+		<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+
+		<!-- jQuery library -->
+		<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+
+		<!-- Latest compiled JavaScript -->
+		<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>
+		
+		<!-- Toggles -->
+		<link href="https://gitcdn.github.io/bootstrap-toggle/2.2.2/css/bootstrap-toggle.min.css" rel="stylesheet">
+		<script src="https://gitcdn.github.io/bootstrap-toggle/2.2.2/js/bootstrap-toggle.min.js"></script>
+		
+		<!-- Momentjs -->
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.17.0/moment.min.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.17.0/locale/ru.js"></script>
+		
+		
+	</head>
+	<body style="min-height:100%">
+		<div id="appcontent" class="container">
+			<div class="panel-content" id="id_controls">
+				<ul id="id_tidlist" hidden="true"></ul>
+				<div id="buttons" class="well">
+					<button onclick="sendlist();" type="button" class="btn btn-success btn-block">Выбрать пользователя и отправить <span class="glyphicon glyphicon-envelope"></span></button>
+					<br>
+					<div class="row">
+					  <div class="col-sm-3"><button onclick="formTaskList();" type="button" class="btn btn-primary btn-block">Обновить<span class="glyphicon glyphicon-hand-down"></span></button></div>
+					  
+					  <div class="col-sm-3"><div class="checkbox-inline" data-toggle="tooltip" title="Добавляет последний комментарий к задаче"><label><input type="checkbox" id="inclcomm_cb" value="" data-toggle="toggle" data-on="Включать" data-off="Не включать">комментарии</label></div></div>
+					  
+					  <div class="col-sm-3"><div class="checkbox-inline" data-toggle="tooltip" title="Добавляет последнюю запись о трудозатратах"><label><input type="checkbox" id="incllog_cb" value="" data-toggle="toggle" data-on="Включать" data-off="Не включать" checked>времязатраты</label></div></div>
+					
+					  <div class="col-sm-3"><div class="checkbox-inline" data-toggle="tooltip" title="Собрать отчёт из задач, изменение которых было с начала недели"><label><input type="checkbox" id="weekrep_cb" value="" data-toggle="toggle" data-on="Недельный" data-off="Дневной"></label></div></div>
+					
+					</div>
+				</div>
+				<!-- <button onclick="includeComments();" type="button" class="btn btn-primary" hidden="true">Включить последние комментарии</button> -->
+				<div class="panel panel-default">
+				  <div class="panel-heading" id="id_tasklist_head"></div>
+				  <div class="panel-body"><ul id="id_ul_tasks" class="list-group"></ul></div>
+				  <div class="panel-footer" id="id_tasklist_foot"></div>
+				</div>
+				<button data-toggle="collapse" data-target="#id_notification" type="button" class="btn btn-default btn-block btn-xs">Показать сообщение</button>
+				<div id="id_notification" class="collapse">
+					<textarea id="id_taskbox" class="form-control">Подготовка...</textarea>
+				</div>
+			</div>
+			<hr>
+			<div id="id_info">
+				<h2>Если в начале дня:</h2>
+				<ul>
+					<li>Набрать задач в "задачи дня" (через часики).</li>
+					<li>Нажать "Выбор получателя и отправка", выбрать кому отправлять, нажать "выбрать".</li>
+					<li>WORK HARD.</li>
+				</ul>
+				<h2>Если в конце дня:</h2>
+				<ul>
+					<li>Актуализировать статусы задач (статус, времязатраты, комментарии), обновить список.</li>
+					<li>Включить отправку комментариев если нужно.</li>
+					<li>Нажать "Выбор получателя и отправка", выбрать кому отправлять, нажать "выбрать".</li>
+				</ul>
+			</div>
+		</div>
+	</body>
+</html>
+
+<script type="text/javascript">
+
+var next_task = 0;
+var next_task_log = 0;
+var last_task = 0;
+var statuses = 			["СОЗДАНА","ПРОСРОЧЕНА","СОЗДАНА","ПРИНЯТА","ВЫПОЛНЕНО","ЗАВЕРШЕНА","ОТЛОЖЕНА","ОТЛОЖЕНА","ОТКЛОНЕНА"];
+var status_context = 	["list-group-item-info","list-group-item-danger","list-group-item-info","list-group-item-info","list-group-item-success","list-group-item-success","list-group-item-warning","list-group-item-warning","list-group-item-danger"];
+var max_commstring_len = 50;
+var max_logstring_len = 50;
+var cusrid = 0;
+var cdate = [date = 0, month = 0, year = 0];
+var cusr_elapsed = 0;
+var rep_entity = {entity:"report_storage", 
+				 name:"Хранилище отчётов"};
+
+$(document).ready(function(){
+    $('[data-toggle="tooltip"]').tooltip(); 
+});
+
+function pad(num, size) {
+    var s = num+"";
+    while (s.length < size) s = "0" + s;
+    return s;
+}
+
+
+function secondsToTime(secs)
+{
+    var hours = Math.floor(secs / (60 * 60));
+   
+    var divisor_for_minutes = secs % (60 * 60);
+    var minutes = Math.floor(divisor_for_minutes / 60);
+ 
+    var divisor_for_seconds = divisor_for_minutes % 60;
+    var seconds = Math.ceil(divisor_for_seconds);
+   
+    var obj = {
+        "h": hours,
+        "m": minutes,
+        "s": seconds
+    };
+    return obj;
+}
+
+function getCurrentMonday(d) {
+	d = new Date(d);
+	var day = d.getDay();
+	var diff = d.getDate() - day + (day == 0 ? -6:1);
+	return new Date(d.setDate(diff));
+}
+
+BX24.init(function()
+{
+	formTaskList();
+});
+
+function process_tasklist(tasks) {
+	console.dir(tasks);
+	var tasks_array = tasks.data();
+	last_task = tasks_array.length;
+	
+	var ul_tasklist = document.getElementById("id_ul_tasks");
+	var tl_foot = document.getElementById("id_tasklist_foot");
+	var tl_head = document.getElementById("id_tasklist_head");
+	var cb_includecomm = document.getElementById("id_cb_includec");
+	var ul_tidlist = document.getElementById("id_tidlist");
+	var cb_weekrep = document.getElementById("weekrep_cb");
+	
+	ul_tasklist.innerHTML = "";
+	tl_foot.innerHTML = "";
+	tl_head.innerHTML = "";
+	ul_tidlist.innerHTML = "";
+	
+	var d = new Date();
+	var tasklist_text = "";
+	
+	if (cb_weekrep.checked) {
+		d = getCurrentMonday(new Date());
+		tasklist_text = "Отчёт недели с ";
+	} else {
+		tasklist_text = 'Задачи на день ';
+	}	
+	var curr_date = d.getDate();
+	var curr_month = d.getMonth() + 1;
+	var curr_year = d.getFullYear();
+	var dato = pad(curr_date,2) + "-" + pad(curr_month,2) + "-" + curr_year;
+	cdate.date = curr_date;
+	cdate.month = curr_month;
+	cdate.year = curr_year;
+	
+	tasklist_text += dato+":";	
+	
+	var tl_head_caption = document.createTextNode(tasklist_text);
+	tl_head.appendChild(tl_head_caption);
+	
+	task_index = 0;
+	
+	var tot_time = 0;
+	// form report string	
+	
+	for (var i = 0; i<tasks_array.length; i++)
+	{
+		var task = tasks_array[i];
+		
+		// fill hidden id list
+		var li_tid = document.createElement("li");
+		var tx_tid = document.createTextNode(task.ID);
+		li_tid.appendChild(tx_tid);
+		ul_tidlist.appendChild(li_tid);
+		
+		var taskstr = (i+1)+'. ['+statuses[task.REAL_STATUS]+'] '+task.TITLE;
+		
+		// create li to ul
+		var li_task = document.createElement("li");
+		var tx_task = document.createTextNode(taskstr);
+		li_task.setAttribute("data-taskid",task.ID);
+		li_task.setAttribute("class","list-group-item "+status_context[task.REAL_STATUS]);
+		li_task.appendChild(tx_task);				
+		ul_tasklist.appendChild(li_task);
+		
+		var t = task.TIME_SPENT_IN_LOGS;
+		if (t == null)
+			console.log('Is not a number!');
+		 else 
+			tot_time = tot_time + parseInt(t);
+	}
+	console.log("Elapsed:"+tot_time);
+	
+	fillTextBox();
+	
+	var cb_inclcomm = document.getElementById("inclcomm_cb");
+	var cb_incllog = document.getElementById("incllog_cb");
+	
+	if (cb_inclcomm.checked == true)
+		includeComments();
+	
+	if (cb_incllog.checked == true)
+		includeLog();
+}
+
+
+function formTaskList()
+{
+	BX24.callMethod(
+		'user.current',
+		{},
+		function(cusrret) {
+			cusrid = cusrret.data().ID;
+			var cb_weekrep = document.getElementById("weekrep_cb");
+			if (cb_weekrep.checked) {
+			
+				var cdat = new Date();
+				cdat.setHours(0);
+				cdat.setMinutes(0);
+				var week_begin = getCurrentMonday(cdat);
+				var mom_date = moment(week_begin);
+				var date_filter = mom_date.format("YYYY-MM-DDTHH:mm:ssZ");
+
+				
+				BX24.callMethod(
+						'task.item.list',
+						[
+							{"ID":'asc'},
+							{"RESPONSIBLE_ID":cusrid, ">=CHANGED_DATE":date_filter},
+						],
+						process_tasklist);
+			
+			} else {
+				BX24.callMethod(
+				'task.planner.getlist',
+				[],
+				function(tl){
+					var task_idlist = tl.data();
+					BX24.callMethod(
+						'task.item.list',
+						[
+							{ID:'asc'},
+							{ID:task_idlist},
+						],
+						process_tasklist);
+				});	
+			};
+			
+			
+	});
+}
+
+function includeComments()
+{	
+	next_task = 0;
+	getNextTaskComment();	
+}
+
+function includeLog()
+{
+	next_task_log = 0;
+	getNextTaskLog();
+}
+
+function getNextTaskLog()
+{
+	if (next_task_log < last_task) {
+		var ul_tidlist = document.getElementById("id_tidlist");
+		var taskid = ul_tidlist.getElementsByTagName("li")[next_task_log].innerHTML;
+		var cb_weekrep = document.getElementById("weekrep_cb");
+		
+		var cdat = new Date();
+		cdat.setHours(0);
+		cdat.setMinutes(0);
+		var mom_date = moment(cdat);
+		
+		if (cb_weekrep.checked) {
+			var week_begin = getCurrentMonday(cdat);
+			mom_date = moment(week_begin);
+		};
+		var date_filter = mom_date.format("YYYY-MM-DDTHH:mm:ssZ");
+		
+		
+		
+		
+		
+		/*
+		var cdat = new Date();
+		cdat.setHours(0);
+		cdat.setMinutes(0);
+		var week_begin = getCurrentMonday(cdat);
+		var mom_date = moment(week_begin);
+		var date_filter = mom_date.format("YYYY-MM-DDTHH:mm:ssZ");
+		
+		
+		*/
+		
+		console.log("Current task index:"+next_task_log+"/"+taskid);
+		
+		BX24.callMethod(
+						'task.elapseditem.getlist',
+						// '>CREATED_DATE':now
+						[taskid,
+						{'CREATED_DATE':'asc'},
+						{'USER_ID':cusrid,'>=CREATED_DATE':date_filter}],
+						function(loglist)
+						{
+							console.dir(loglist)
+							var tl_items = document.getElementById("id_ul_tasks").getElementsByTagName("li");
+							if (loglist.data().length>0)
+							{
+								var elapse_total = 0;
+								for (var i = 0; i<loglist.data().length; i++) {
+									var logdat = loglist.data()[i];
+									elapse_total += parseInt(logdat.SECONDS);
+								}
+								var tot_elaps = secondsToTime(elapse_total);
+								var total_elapse_str = tot_elaps["h"]+":"+pad(tot_elaps["m"],2)+":"+pad(tot_elaps["s"],2);
+								
+								
+								var logdat = loglist.data()[loglist.data().length-1];
+								cusr_elapsed += elapse_total;
+								var elaps = secondsToTime(parseInt(logdat.SECONDS));
+								var commstr = '';
+								if (logdat.COMMENT_TEXT.length > 0)
+								{
+									commstr = ' :: '+logdat.COMMENT_TEXT;
+									if (commstr.length>max_logstring_len) commstr = commstr.substring(0,max_logstring_len) + ' [...]'; 
+								}
+								var logstring = elaps["h"]+":"+pad(elaps["m"],2)+":"+pad(elaps["s"],2)+ ' [' + total_elapse_str + ']' +' @ '+logdat.DATE_START.substring(0,10)+commstr;
+								tl_items[next_task_log].innerHTML = tl_items[next_task_log].innerHTML + ' # ' + logstring;
+							}
+							next_task_log++;
+							getNextTaskLog();
+					});		
+	} else {
+	
+		var tl_foot = document.getElementById("id_tasklist_foot");
+		var elapsed = secondsToTime(cusr_elapsed);
+		var tasklist_foot = '\n\nСумма времязатрат задач: '+elapsed["h"]+":"+pad(elapsed["m"],2)+":"+pad(elapsed["s"],2);
+		var tl_foot_caption = document.createTextNode(tasklist_foot);
+		tl_foot.appendChild(tl_foot_caption);
+		
+		cusr_elapsed = 0;
+		
+		fillTextBox();
+		
+		
+	}
+}
+
+
+function getNextTaskComment()
+{
+	if (next_task < last_task) {
+		var ul_tidlist = document.getElementById("id_tidlist");
+		var taskid = ul_tidlist.getElementsByTagName("li")[next_task].innerHTML;
+		console.log("Current task index:"+next_task+"/"+taskid);
+		
+		BX24.callMethod(
+						'task.commentitem.getlist',
+						[taskid,{'POST_DATE':'asc'},{'AUTHOR_ID':cusrid}],
+						function(commlist)
+						{
+							console.dir(commlist)
+							var tl_items = document.getElementById("id_ul_tasks").getElementsByTagName("li");
+							if (commlist.data().length>1)
+							{
+								var commstring = commlist.data()[commlist.data().length-1].POST_MESSAGE;
+								if (commstring.length>max_commstring_len) commstring = commstring.substring(0,max_commstring_len) + ' [...]'; 
+								tl_items[next_task].innerHTML = tl_items[next_task].innerHTML + ' // ' + commstring;
+							}
+							next_task++;
+							getNextTaskComment();
+					});		
+	} else {
+		fillTextBox();
+	}
+}
+
+
+
+function fillTextBox()
+{
+	var repbox = document.getElementById("id_taskbox");
+	repbox.value = "Подготовка...";
+	
+	var ul_tasklist = document.getElementById("id_ul_tasks");
+	var tl_foot = document.getElementById("id_tasklist_foot");
+	var tl_head = document.getElementById("id_tasklist_head");
+	
+	var str = "";
+	
+	str = tl_head.childNodes[0].nodeValue + "\n";
+	
+	var maxwidth = 0;
+	
+	var list_items = ul_tasklist.getElementsByTagName("li");
+	for (var i = 0; i<list_items.length; i++)
+	{
+		var tstr = list_items[i].childNodes[0].nodeValue;
+		str = str + "\n" + tstr;
+		if (tstr.length > maxwidth) maxwidth = tstr.length;
+	}
+	
+	if ( tl_foot.childNodes[0] != null)
+	{
+		str = str + tl_foot.childNodes[0].nodeValue;
+	}
+	
+	
+	repbox.value = str;
+	
+	var box_width = maxwidth+10;
+	var box_height = list_items.length + 4;
+	repbox.setAttribute("cols",box_width.toString(10));
+	repbox.setAttribute("rows",box_height.toString(10));
+	BX24.fitWindow();
+}
+
+function sendlist()
+{
+	// select receiver user through dialog, send report
+	BX24.selectUsers(function(selected) {
+		var report = document.getElementById("id_taskbox").value;
+		for (var i = 0; i<selected.length; i++)
+		{
+			var id = selected[i].id;
+			BX24.callMethod('im.notify',{to:id,message:report});	
+		}
+	}); 
+}
+</script>
